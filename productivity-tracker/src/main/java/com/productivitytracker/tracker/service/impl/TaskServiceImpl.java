@@ -5,12 +5,16 @@ import com.productivitytracker.tracker.entity.Achievement;
 import com.productivitytracker.tracker.entity.Task;
 import com.productivitytracker.tracker.entity.User;
 import com.productivitytracker.tracker.entity.UserAchievement;
+import com.productivitytracker.tracker.entity.UserStats;
+import com.productivitytracker.tracker.entity.XpLog;
 import com.productivitytracker.tracker.exception.ResourceNotFoundException;
 import com.productivitytracker.tracker.mapper.TaskMapper;
 import com.productivitytracker.tracker.repository.AchievementRepository;
 import com.productivitytracker.tracker.repository.TaskRepository;
 import com.productivitytracker.tracker.repository.UserAchievementRepository;
 import com.productivitytracker.tracker.repository.UserRepository;
+import com.productivitytracker.tracker.repository.UserStatsRepository;
+import com.productivitytracker.tracker.repository.XpLogRepository;
 import com.productivitytracker.tracker.service.TaskService;
 import com.productivitytracker.tracker.entity.TaskLogs;
 import com.productivitytracker.tracker.repository.TaskLogsRepository;
@@ -18,6 +22,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,6 +38,8 @@ public class TaskServiceImpl implements TaskService {
     private TaskLogsRepository taskLogsRepository;
     private AchievementRepository achievementRepository;
     private UserAchievementRepository userAchievementRepository;
+    private UserStatsRepository userStatsRepository;
+    private XpLogRepository xpLogRepository;
 
     // Must match the titles seeded by AchievementSeeder exactly.
     private static final Map<String, Integer> TASK_COUNT_ACHIEVEMENTS = new LinkedHashMap<>() {{
@@ -40,6 +47,15 @@ public class TaskServiceImpl implements TaskService {
         put("Getting Things Done", 5);
         put("Task Master", 20);
     }};
+
+    // XP awarded per completed task, based on its priority. Anything else
+    // (null, unrecognised value) falls back to DEFAULT_TASK_XP.
+    private static final Map<String, Integer> XP_BY_PRIORITY = Map.of(
+            "HIGH", 15,
+            "MEDIUM", 10,
+            "LOW", 5
+    );
+    private static final int DEFAULT_TASK_XP = 10;
 
     @Override
     public TaskDto createTask(Long userId, TaskDto dto) {
@@ -110,6 +126,7 @@ public class TaskServiceImpl implements TaskService {
 
         if (justCompleted) {
             logTaskAction(updated, "COMPLETED");
+            rewardTaskCompletion(updated, requestingUserId);
             checkAndAwardTaskCountAchievements(requestingUserId);
         } else if (justReopened) {
             logTaskAction(updated, "REOPENED");
@@ -125,6 +142,56 @@ public class TaskServiceImpl implements TaskService {
         log.setAction(action);
         log.setCreatedAt(LocalDateTime.now());
         taskLogsRepository.save(log);
+    }
+
+    // Awards XP for completing this task "today" and updates the user's
+    // streak: completing at least one task on a new calendar day extends
+    // the streak by one; completing more tasks the same day still earns XP
+    // but doesn't inflate the streak further; missing a day resets it to 1.
+    private void rewardTaskCompletion(Task task, Long userId) {
+
+        int xpAmount = XP_BY_PRIORITY.getOrDefault(
+                task.getPriority() == null ? "" : task.getPriority().toUpperCase(),
+                DEFAULT_TASK_XP
+        );
+
+        XpLog xpLog = new XpLog();
+        xpLog.setUser(task.getUser());
+        xpLog.setSource("TASK_COMPLETED");
+        xpLog.setAmount(xpAmount);
+        xpLogRepository.save(xpLog);
+
+        UserStats stats = userStatsRepository.findByUser_UserId(userId)
+                .orElseGet(() -> {
+                    UserStats s = new UserStats();
+                    s.setUser(task.getUser());
+                    s.setTotalXp(0);
+                    s.setCurrentStreak(0);
+                    s.setLongestStreak(0);
+                    return s;
+                });
+
+        stats.setTotalXp((stats.getTotalXp() == null ? 0 : stats.getTotalXp()) + xpAmount);
+
+        LocalDate today = LocalDate.now();
+        LocalDate lastActive = stats.getLastActivityDate();
+
+        if (lastActive == null || lastActive.isBefore(today.minusDays(1))) {
+            // First ever activity, or the streak was broken by a missed day.
+            stats.setCurrentStreak(1);
+        } else if (lastActive.equals(today.minusDays(1))) {
+            // Completed something yesterday, and now today too — extend it.
+            stats.setCurrentStreak((stats.getCurrentStreak() == null ? 0 : stats.getCurrentStreak()) + 1);
+        }
+        // else lastActive.equals(today): already counted today, streak unchanged.
+
+        int currentStreak = stats.getCurrentStreak() == null ? 0 : stats.getCurrentStreak();
+        int longestStreak = stats.getLongestStreak() == null ? 0 : stats.getLongestStreak();
+        stats.setLongestStreak(Math.max(longestStreak, currentStreak));
+
+        stats.setLastActivityDate(today);
+
+        userStatsRepository.save(stats);
     }
 
     // Checks the user's total completed-task count against each threshold in
