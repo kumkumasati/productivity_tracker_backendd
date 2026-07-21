@@ -9,4 +9,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     //  Get all tasks for a user
     List<Task> findByUserUserId(Long userId);
+
+    // Used to check completed-task-count achievement thresholds
+    long countByUserUserIdAndStatusIgnoreCase(Long userId, String status);
 }

@@ -1,11 +1,15 @@
 package com.productivitytracker.tracker.service.impl;
 
 import com.productivitytracker.tracker.dto.TaskDto;
+import com.productivitytracker.tracker.entity.Achievement;
 import com.productivitytracker.tracker.entity.Task;
 import com.productivitytracker.tracker.entity.User;
+import com.productivitytracker.tracker.entity.UserAchievement;
 import com.productivitytracker.tracker.exception.ResourceNotFoundException;
 import com.productivitytracker.tracker.mapper.TaskMapper;
+import com.productivitytracker.tracker.repository.AchievementRepository;
 import com.productivitytracker.tracker.repository.TaskRepository;
+import com.productivitytracker.tracker.repository.UserAchievementRepository;
 import com.productivitytracker.tracker.repository.UserRepository;
 import com.productivitytracker.tracker.service.TaskService;
 import com.productivitytracker.tracker.entity.TaskLogs;
@@ -15,7 +19,9 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,6 +31,15 @@ public class TaskServiceImpl implements TaskService {
     private TaskRepository taskRepository;
     private UserRepository userRepository;
     private TaskLogsRepository taskLogsRepository;
+    private AchievementRepository achievementRepository;
+    private UserAchievementRepository userAchievementRepository;
+
+    // Must match the titles seeded by AchievementSeeder exactly.
+    private static final Map<String, Integer> TASK_COUNT_ACHIEVEMENTS = new LinkedHashMap<>() {{
+        put("First Steps", 1);
+        put("Getting Things Done", 5);
+        put("Task Master", 20);
+    }};
 
     @Override
     public TaskDto createTask(Long userId, TaskDto dto) {
@@ -95,6 +110,7 @@ public class TaskServiceImpl implements TaskService {
 
         if (justCompleted) {
             logTaskAction(updated, "COMPLETED");
+            checkAndAwardTaskCountAchievements(requestingUserId);
         } else if (justReopened) {
             logTaskAction(updated, "REOPENED");
         }
@@ -109,6 +125,43 @@ public class TaskServiceImpl implements TaskService {
         log.setAction(action);
         log.setCreatedAt(LocalDateTime.now());
         taskLogsRepository.save(log);
+    }
+
+    // Checks the user's total completed-task count against each threshold in
+    // TASK_COUNT_ACHIEVEMENTS, and awards any newly-crossed achievement that
+    // they don't already have. Safe to call every time a task is completed —
+    // findByUser_UserIdAndAchievement_AchievementId prevents duplicate awards.
+    private void checkAndAwardTaskCountAchievements(Long userId) {
+
+        long completedCount = taskRepository.countByUserUserIdAndStatusIgnoreCase(userId, "COMPLETED");
+
+        TASK_COUNT_ACHIEVEMENTS.forEach((title, threshold) -> {
+            if (completedCount < threshold) {
+                return;
+            }
+
+            achievementRepository.findByTitle(title).stream().findFirst().ifPresent(achievement -> {
+                boolean alreadyEarned = userAchievementRepository
+                        .findByUser_UserIdAndAchievement_AchievementId(userId, achievement.getAchievementId())
+                        .isPresent();
+
+                if (!alreadyEarned) {
+                    awardAchievement(userId, achievement);
+                }
+            });
+        });
+    }
+
+    private void awardAchievement(Long userId, Achievement achievement) {
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null) {
+            return;
+        }
+
+        UserAchievement ua = new UserAchievement();
+        ua.setUser(user);
+        ua.setAchievement(achievement);
+        userAchievementRepository.save(ua);
     }
 
     @Override
