@@ -32,6 +32,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(403).body(new ApiError("FORBIDDEN", "You do not have access to this resource"));
     }
 
+    @ExceptionHandler(TaskCannotBeDeletedException.class)
+    public ResponseEntity<ApiError> taskCannotBeDeleted(TaskCannotBeDeletedException e) {
+        return ResponseEntity.status(409).body(new ApiError("TASK_COMPLETED", e.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> unexpected(Exception e) {
         return ResponseEntity.status(500).body(new ApiError("INTERNAL_ERROR", "Something went wrong"));

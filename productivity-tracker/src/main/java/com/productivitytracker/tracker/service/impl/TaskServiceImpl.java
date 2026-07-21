@@ -62,45 +62,45 @@ public class TaskServiceImpl implements TaskService {
                 .collect(Collectors.toList());
     }
 
-@Override
-public TaskDto updateTask(Long taskId, TaskDto dto, Long requestingUserId) {
+    @Override
+    public TaskDto updateTask(Long taskId, TaskDto dto, Long requestingUserId) {
 
-    Task task = taskRepository.findById(taskId)
-            .orElseThrow(() -> new ResourceNotFoundException("Task not found " + taskId));
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found " + taskId));
 
-    assertOwnership(task, requestingUserId);
+        assertOwnership(task, requestingUserId);
 
-    String previousStatus = task.getStatus();
-    String newStatus = dto.getStatus();
+        String previousStatus = task.getStatus();
+        String newStatus = dto.getStatus();
 
-    task.setTitle(dto.getTitle());
-    task.setDescription(dto.getDescription());
-    task.setStatus(newStatus);
-    task.setPriority(dto.getPriority());
-    task.setDueDate(dto.getDueDate());
-    task.setUpdatedAt(LocalDateTime.now());
+        task.setTitle(dto.getTitle());
+        task.setDescription(dto.getDescription());
+        task.setStatus(newStatus);
+        task.setPriority(dto.getPriority());
+        task.setDueDate(dto.getDueDate());
+        task.setUpdatedAt(LocalDateTime.now());
 
-    boolean justCompleted = "COMPLETED".equalsIgnoreCase(newStatus)
-            && !"COMPLETED".equalsIgnoreCase(previousStatus);
-    boolean justReopened = !"COMPLETED".equalsIgnoreCase(newStatus)
-            && "COMPLETED".equalsIgnoreCase(previousStatus);
+        boolean justCompleted = "COMPLETED".equalsIgnoreCase(newStatus)
+                && !"COMPLETED".equalsIgnoreCase(previousStatus);
+        boolean justReopened = !"COMPLETED".equalsIgnoreCase(newStatus)
+                && "COMPLETED".equalsIgnoreCase(previousStatus);
 
-    if (justCompleted) {
-        task.setCompletedDate(LocalDateTime.now());
-    } else if (justReopened) {
-        task.setCompletedDate(null);
+        if (justCompleted) {
+            task.setCompletedDate(LocalDateTime.now());
+        } else if (justReopened) {
+            task.setCompletedDate(null);
+        }
+
+        Task updated = taskRepository.save(task);
+
+        if (justCompleted) {
+            logTaskAction(updated, "COMPLETED");
+        } else if (justReopened) {
+            logTaskAction(updated, "REOPENED");
+        }
+
+        return TaskMapper.mapToTaskDto(updated);
     }
-
-    Task updated = taskRepository.save(task);
-
-    if (justCompleted) {
-        logTaskAction(updated, "COMPLETED");
-    } else if (justReopened) {
-        logTaskAction(updated, "REOPENED");
-    }
-
-    return TaskMapper.mapToTaskDto(updated);
-}
 
     private void logTaskAction(Task task, String action) {
         TaskLogs log = new TaskLogs();
@@ -118,6 +118,12 @@ public TaskDto updateTask(Long taskId, TaskDto dto, Long requestingUserId) {
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found " + taskId));
 
         assertOwnership(task, requestingUserId);
+
+        if ("COMPLETED".equalsIgnoreCase(task.getStatus())) {
+            throw new com.productivitytracker.tracker.exception.TaskCannotBeDeletedException(
+                    "Completed tasks can't be deleted, since they're part of your weekly report history. " +
+                            "Reopen it first if you really want to remove it.");
+        }
 
         taskRepository.delete(task);
     }
