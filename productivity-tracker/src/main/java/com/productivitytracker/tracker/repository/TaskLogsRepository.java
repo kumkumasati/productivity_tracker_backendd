@@ -9,15 +9,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public interface TaskLogsRepository extends JpaRepository<TaskLogs, Long> {
-@Query("""
+
+    List<TaskLogs> findByTaskTaskId(Long taskId);
+
+    @Query("""
 SELECT tl.action, tl.createdAt, t.title
 FROM TaskLogs tl
 JOIN tl.task t
 WHERE tl.user.userId = :userId
 AND tl.createdAt >= :startDate
 """)
-List<Object[]> getWeeklyCompletedTasks(
-        @Param("userId") Long userId,
-        @Param("startDate") LocalDateTime startDate
-);
+    List<Object[]> getWeeklyCompletedTasks(
+            @Param("userId") Long userId,
+            @Param("startDate") LocalDateTime startDate
+    );
 }

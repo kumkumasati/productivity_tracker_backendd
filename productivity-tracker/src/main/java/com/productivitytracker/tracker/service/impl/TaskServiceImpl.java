@@ -119,10 +119,10 @@ public class TaskServiceImpl implements TaskService {
 
         assertOwnership(task, requestingUserId);
 
-        if ("COMPLETED".equalsIgnoreCase(task.getStatus())) {
+        boolean hasHistory = !taskLogsRepository.findByTaskTaskId(taskId).isEmpty();
+        if (hasHistory) {
             throw new com.productivitytracker.tracker.exception.TaskCannotBeDeletedException(
-                    "Completed tasks can't be deleted, since they're part of your weekly report history. " +
-                            "Reopen it first if you really want to remove it.");
+                    "This task has completion history that's part of your weekly report and can't be deleted.");
         }
 
         taskRepository.delete(task);
